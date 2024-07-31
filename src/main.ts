@@ -45,34 +45,39 @@ export default class MyPlugin extends Plugin {
     }
 
     async addTransaction(type: 'expense' | 'income') {
-        const modal = new TransactionModal(this.app, type, this.settings.accounts, this.settings.categories);
-        const result = await modal.open();
-        if (result) {
-            const { amount, description, account, category } = result;
-            const now = new Date();
-            const year = now.getFullYear().toString();
-            const month = (now.getMonth() + 1).toString().padStart(2, '0');
-            const day = now.getDate().toString().padStart(2, '0');
-            const timestamp = now.toISOString().split('T')[0] + '-' + now.toTimeString().split(' ')[0].replace(/:/g, '-');
-            const filename = `${timestamp}_${type}.md`;
-            const folderPath = `${this.settings.storageFolder}/${year}/${year}-${month}/${year}-${month}-${day}`;
-            const filePath = `${folderPath}/${filename}`;
-            const content = `## ${type.charAt(0).toUpperCase() + type.slice(1)}\n\n- Amount: ${type === 'expense' ? '-' : ''}${amount}\n- Description: ${description}\n- Account: ${account}\n- Category: ${category}`;
+    const modal = new TransactionModal(this.app, type, this.settings.accounts, this.settings.categories);
+    const result = await modal.open();
 
-            try {
-                // Ensure folder exists
-                await this.ensureFolderExists(folderPath);
+    // Check if the result contains valid data before proceeding
+    if (result && result.amount && result.description && result.account && result.category) {
+        const { amount, description, account, category } = result;
+        const now = new Date();
+        const year = now.getFullYear().toString();
+        const month = (now.getMonth() + 1).toString().padStart(2, '0');
+        const day = now.getDate().toString().padStart(2, '0');
+        const timestamp = now.toISOString().split('T')[0] + '-' + now.toTimeString().split(' ')[0].replace(/:/g, '-');
+        const filename = `${timestamp}_${type}.md`;
+        const folderPath = `${this.settings.storageFolder}/${year}/${year}-${month}/${year}-${month}-${day}`;
+        const filePath = `${folderPath}/${filename}`;
+        const content = `## ${type.charAt(0).toUpperCase() + type.slice(1)}\n\n- Amount: ${type === 'expense' ? '-' : ''}${amount}\n- Description: ${description}\n- Account: ${account}\n- Category: ${category}`;
 
-                // Create and write to the file
-                await this.app.vault.create(filePath, content);
-                new Notice(`${type.charAt(0).toUpperCase() + type.slice(1)} added successfully!`);
-                console.log(`File created: ${filePath}`);
-            } catch (error) {
-                console.error(`Error writing file: ${error}`);
-                new Notice(`Error: Failed to add ${type}. Check console for details.`);
-            }
+        try {
+            // Ensure folder exists
+            await this.ensureFolderExists(folderPath);
+
+            // Create and write to the file
+            await this.app.vault.create(filePath, content);
+            new Notice(`${type.charAt(0).toUpperCase() + type.slice(1)} added successfully!`);
+            console.log(`File created: ${filePath}`);
+        } catch (error) {
+            console.error(`Error writing file: ${error}`);
+            new Notice(`Error: Failed to add ${type}. Check console for details.`);
         }
+    } else {
+        console.log('Transaction cancelled or invalid data provided.');
     }
+}
+
 
 
 
@@ -224,7 +229,7 @@ class TransactionModal extends Modal {
     type: 'expense' | 'income';
     accounts: string[];
     categories: string[];
-    result: any = {};
+    result: any;
 
     constructor(app: App, type: 'expense' | 'income', accounts: string[], categories: string[]) {
         super(app);
@@ -234,39 +239,34 @@ class TransactionModal extends Modal {
     }
 
     onOpen() {
-        let { contentEl } = this;
+        const { contentEl } = this;
         contentEl.createEl('h2', { text: `Add ${this.type.charAt(0).toUpperCase() + this.type.slice(1)}` });
 
         const form = contentEl.createEl('form');
 
-        const amountInput = form.createEl('input', { type: 'number', placeholder: 'Amount', required: true });
-        amountInput.classList.add('modal-input');
-        amountInput.focus();
+        const amountInput = form.createEl('input', { type: 'number', placeholder: 'Amount', name: 'amount', required: true });
+        const descriptionInput = form.createEl('input', { type: 'text', placeholder: 'Description', name: 'description', required: true });
+        
+        const accountSelect = form.createEl('select', { name: 'account' });
+        this.accounts.forEach(account => accountSelect.createEl('option', { value: account, text: account }));
 
-        const descriptionInput = form.createEl('input', { type: 'text', placeholder: 'Description', required: true });
-        descriptionInput.classList.add('modal-input');
-
-        const accountSelect = form.createEl('select');
-        this.accounts.forEach(account => {
-            accountSelect.createEl('option', { text: account });
-        });
-        accountSelect.classList.add('modal-input');
-
-        const categorySelect = form.createEl('select');
-        this.categories.forEach(category => {
-            categorySelect.createEl('option', { text: category });
-        });
-        categorySelect.classList.add('modal-input');
+        const categorySelect = form.createEl('select', { name: 'category' });
+        this.categories.forEach(category => categorySelect.createEl('option', { value: category, text: category }));
 
         const submitButton = form.createEl('button', { text: 'Add', type: 'submit' });
-        submitButton.classList.add('mod-cta');
         submitButton.addEventListener('click', async (evt) => {
             evt.preventDefault();
-            this.result.amount = amountInput.value.trim();
-            this.result.description = descriptionInput.value.trim();
-            this.result.account = accountSelect.value;
-            this.result.category = categorySelect.value;
-            this.close();
+            const amount = amountInput.value.trim();
+            const description = descriptionInput.value.trim();
+            const account = accountSelect.value;
+            const category = categorySelect.value;
+
+            if (amount && description && account && category) {
+                this.result = { amount, description, account, category };
+                this.close();
+            } else {
+                new Notice('Please fill in all fields correctly.');
+            }
         });
     }
 
@@ -275,13 +275,17 @@ class TransactionModal extends Modal {
         contentEl.empty();
     }
 
-    async open(): Promise<any> {
+    open(): Promise<any> {
         return new Promise((resolve) => {
             super.open();
-            this.onClose = () => resolve(this.result);
+            this.onClose = () => {
+                resolve(this.result);
+                super.onClose();
+            };
         });
     }
 }
+
 
 class ReportModal extends Modal {
     result: any;
